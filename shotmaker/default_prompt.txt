@@ -1,0 +1,10 @@
+{{system_prompt}}
+
+{{task_description}}
+
+Examples:
+{% for example in examples %}
+{{example}}
+{{example_delimiter}}
+{% endfor %}
+{{query}}

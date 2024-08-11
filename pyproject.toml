@@ -1,0 +1,22 @@
+[project]
+name = "shotmaker"
+version = "0.0.1"
+authors = [
+  { name="Elliot Hallmark", email="Permafacture@gmail.com" },
+]
+dynamic = ["dependencies"]
+description = "Framework for generating and evaluating few hot LLM prompts"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[project.urls]
+Homepage = "https://github.com/Permafacture/shotmaker"
+Issues = "https://github.com/Permafacture/shotmaker/issues"
