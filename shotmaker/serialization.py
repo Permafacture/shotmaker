@@ -3,14 +3,42 @@ import inspect
 import importlib
 from typing import Any, Dict, Type
 
+# Use these function to serializae and deserialize
+
 def to_json(obj):
+    """Create a JSON string from a Jsonizeable object"""
     return json.dumps(obj.to_json())
 
 def from_json(json_string):
+    """Deserialize a JSON string into a Jsonizeable object"""
     json_data = json.loads(json_string)
     return Jsonizeable.from_json(json_data)
 
 class Jsonizeable:
+    """
+    A mixin class that provides JSON serialization and deserialization capabilities.
+
+    This is intended to save and load the configuation of simple objects and not
+    Pickle which saves the states of objects
+
+    This class implements two main methods:
+    - to_json(): Serializes the object to a JSON-compatible dictionary.
+    - from_json(): Deserializes a JSON-compatible dictionary back into an object.
+
+    Classes that inherit from Jsonizeable should follow these guidelines:
+    1. Ensure that all parameters in the __init__ method correspond to object attributes
+           with the same names. Transformations of the input values should be stored on
+           separate attributes
+    2. Use only JSON-serializable types (str, int, float, bool, None) or Jsonizeable
+           objects as attribute values, as well as lists and dicts containing
+           those types.
+    3. Serialized objects are instantiated when they are encountered and each is a unique
+           instance. Objects sharing a reference to a single object will have seperate
+           objects after deserialization
+    4. All classes must be defined in this same module as Jsonizeable. Have not tested
+           having Jsonizeable be defined in it's own module
+
+    """
 
     @classmethod
     def from_json(cls, json_data):
