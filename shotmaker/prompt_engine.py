@@ -1,23 +1,55 @@
+import re
+import json
+from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 from jinja2 import Environment, FileSystemLoader, meta
-from shotmaker.data_converters import DataConverter, StringConverter
+from shotmaker.data_converters import DataConverter, StringConverter, BasicDelimiter
 
 def format_key(key: str) -> str:
     # TODO make this more customizeable
     return f"{key.title()}:\n"
 
+default_template = Path(__file__).parent / 'default_prompt.txt'
+
 class PromptComponentFormatter:
-    def __init__(self, converters: Dict[str, DataConverter]):
+
+    def __init__(self, converters):
+        """
+        :param converters: Dictionary mapping keys to DataConverter instances
+        """
         self.converters = converters
 
-    def format_example(self, example: Dict[str, Any]) -> str:
+    def format_example(self, example):
+        """
+        Format an dictionary of data representing a shot into a string for the prompt.
+        
+        :param example: Dictionary containing example data
+        :return: Formatted shot string
+        """
         return self._format_dict(example)
 
-    def format_query(self, query: Dict[str, Any]) -> str:
-        return self._format_dict(query)
+    def format_query(self, query):
+        """
+        A query is an incomplete example which the LLM will complete to give us a result.
+        The formatted string will include the first key for which we don;t provide a value
+        to prompt the LLM to start there. 
+        
+        :param query: Dictionary containing an incomplete example
+        :return: Formatted query string with the next expected key
+        """
+        last_supplied_key = list(query.keys())[-1]
+        keys = list(self.converters.keys())
+        next_key = keys[keys.index(last_supplied_key) + 1]
+        return self._format_dict(query) + f"\n\n{format_key(next_key)}"
 
-    def _format_dict(self, data: Dict[str, Any]) -> str:
+    def _format_dict(self, data):
+        """
+        General dictionary to string for prompt used for both examples and the query
+        
+        :param data: Dictionary to format
+        :return: Formatted string representation of the dictionary
+        """
         formatted_parts = []
         for key, value in data.items():
             converter = self.converters.get(key, StringConverter())
@@ -25,40 +57,82 @@ class PromptComponentFormatter:
             formatted_parts.append(f"{format_key(key)}{formatted_value}")
         return "\n\n".join(formatted_parts)
 
-    def parse_result(self, result: str) -> Dict[str, Any]:
+    def parse_result(self, result):
+        """
+        Parse a formatted string result back into a dictionary.
+        
+        :param result: Formatted string to parse
+        :return: Dictionary of parsed values
+        """
         parsed_parts = {}
-        for key, converter in self.converters.items():
+        keys = list(self.converters.keys())
+
+        for i, key in enumerate(keys):
             start_index = result.find(format_key(key))
             if start_index == -1:
                 parsed_parts[key] = None
                 continue
-            end_index = result.find("\n\n", start_index)
-            if end_index == -1:
+
+            start_index += len(format_key(key))
+
+            if i < len(keys) - 1:
+                end_index = result.find(format_key(keys[i+1]))
+                if end_index == -1:
+                    end_index = len(result)
+            else:
                 end_index = len(result)
-            formatted_part = result[start_index + len(format_key(key)):end_index].strip()
-            parsed_parts[key] = converter.parse(formatted_part)
+
+            formatted_part = result[start_index:end_index].strip()
+            if not formatted_part:
+                parsed_parts[key] = None
+            else:
+                parsed_parts[key] = self.converters[key].parse(formatted_part)
+
         return parsed_parts
 
 
 class PromptEngine:
-    def __init__(self, template_file: str, component_formatter: PromptComponentFormatter):
-        self.env = Environment(loader=FileSystemLoader('.'))
-        self.template = self.env.get_template(template_file)
+    def __init__(self, component_formatter, delimiter_obj=None, template_file=default_template):
+        """
+        Generates prompt from template utilizing the component formatter to format the
+        shots and query 
+
+        :param component_formatter: PromptComponentFormatter instance
+        :param delimiter_obj: (optional) Delimiter instance. If not provided than a sensible
+            default is used
+        :param template_file: (optional) file containing Jinja2 template. default template used
+            if not provided
+        """
+        template_file = Path(template_file).resolve()
+        self.env = Environment(loader=FileSystemLoader(str(template_file.parent)))
+        self.template = self.env.get_template(template_file.parts[-1])
         self.component_formatter = component_formatter
+        self.delimiter_obj = delimiter_obj or BasicDelimiter('=', 6)
         self.required_variables = self._get_required_variables()
 
-    def _get_required_variables(self) -> set:
-        source = self.env.loader.get_source(self.env, self.template.filename)
+    def _get_required_variables(self):
+        source = self.env.loader.get_source(self.env, self.template.name)
         ast = self.env.parse(source)
         return meta.find_undeclared_variables(ast)
 
-    def _validate_context(self, context: Dict[str, Any], examples: List[Dict[str, Any]], query: Dict[str, Any]):
+    def _validate_context(self, context, examples, query):
+        """ Validate that all required variables are supplied to the template """
         provided_vars = set(context.keys()) | {'examples', 'query'}
         missing_vars = self.required_variables - provided_vars
         if missing_vars:
             raise ValueError(f"Missing required variables: {', '.join(missing_vars)}")
 
-    def generate_prompt(self, context: Dict[str, Any], examples: List[Dict[str, Any]], query: Dict[str, Any]) -> str:
+    def generate_prompt(self, context, examples, query):
+        """
+        Compose the few shot prompt ready to go to LLM. Result can be parsed to retrieve the
+        completion of the query in the same format as the example dictionaries.
+
+        "param context: Dict of strings where keys are varibale names in the jinja 2 template
+        "param examples: List of dicts of strings with keys matching the keys of the component formatter
+        :param query: Dict of strings with missing values to be completed by the LLM
+        :return: prompt ready to go to LLM
+        """
+        context = {'delimiter': self.delimiter_obj.format(), **context}
         self._validate_context(context, examples, query)
 
         formatted_examples = [self.component_formatter.format_example(ex) for ex in examples]
@@ -72,5 +146,19 @@ class PromptEngine:
 
         return self.template.render(full_context)
 
-    def parse_result(self, result: str) -> Dict[str, Any]:
+    def parse_result(self, result):
+        """ Parse the response from the LLM
+
+        :param result: string from the LLM
+        :return: Dictionary representing a completed example
+        """
         return self.component_formatter.parse_result(result)
+
+    def load(self, serialized_examples):
+        """
+        Load and parse multiple examples from a serialized string.
+        
+        :param serialized_examples: String containing multiple serialized examples
+        :return: List of parsed example dictionaries
+        """
+        return [self.parse_result(E) for E in self.delimiter_obj.split(serialized_examples)]

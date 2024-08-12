@@ -5,6 +5,6 @@
 Examples:
 {% for example in examples %}
 {{example}}
-{{example_delimiter}}
+{{delimiter}}
 {% endfor %}
 {{query}}

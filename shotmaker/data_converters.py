@@ -1,7 +1,37 @@
+import re
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 import xml.etree.ElementTree as ET
 import json
+
+class Delimiter(ABC):
+
+    @abstractmethod
+    def format(self):
+        """return string to delimit examples by"""
+        pass
+
+    @abstractmethod
+    def split(self, formatted_text):
+        """split formatted text by example delimiter and return list"""
+        pass
+
+class BasicDelimiter(Delimiter):
+    """Simple delimiter that just puts a line that consists of a character repeated"""
+
+    def __init__(self, char, n=5):
+        self.char = char
+        self.n = n
+        self._setup()
+  
+    def _setup(self):
+        self._regex = re.compile(f"\n{self.char}{{{self.n},}}\n")
+
+    def format(self):
+        return f"\n{self.char*self.n}\n"
+
+    def split(self, formatted_text):
+        return self._regex.split(formatted_text)
 
 class DataConverter(ABC):
     @abstractmethod
