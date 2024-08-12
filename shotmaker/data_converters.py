@@ -1,10 +1,15 @@
 import re
+import json
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 import xml.etree.ElementTree as ET
-import json
+from shotmaker.serialization import Jsonizeable
 
-class Delimiter(ABC):
+class Delimiter(ABC, Jsonizeable):
+
+    def __init__(self):
+        # ABC's must be givin an init for Jsonizeable
+        pass
 
     @abstractmethod
     def format(self):
@@ -33,7 +38,11 @@ class BasicDelimiter(Delimiter):
     def split(self, formatted_text):
         return self._regex.split(formatted_text)
 
-class DataConverter(ABC):
+class DataConverter(ABC, Jsonizeable):
+    def __init__(self):
+        # ABC's must be givin an init for Jsonizeable
+        pass
+
     @abstractmethod
     def format(self, data: Any) -> str:
         pass

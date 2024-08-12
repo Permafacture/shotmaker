@@ -57,7 +57,21 @@ response = llm_api.generate(prompt)
 
 # Parse LLM response
 result = prompt_engine.parse_result(response)
+
+# Serialize and deserialize prompt engine
+json_string = sm.serialization.to_json(prompt_engine)
+new_prompt_engine = sm.serialization.from_json(json_string)
+result_from_reconstructed = new_prompt_engine.parse_result(reponse)
+
+# Load few shot examples from text file in same format as prompt
+# It doesn;t make sense to just load the prompt, but examples and
+#   the prompt are in the same format so this shows the loading ability
+
+reconstructed_examples = prompt_engine.load(prompt)
+examples == reconstructed_examples[:2]  # last item is the query
 ```
+
+
 
 ## Support
 

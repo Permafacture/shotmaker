@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 from jinja2 import Environment, FileSystemLoader, meta
 from shotmaker.data_converters import DataConverter, StringConverter, BasicDelimiter
+from shotmaker.serialization import Jsonizeable
 
 def format_key(key: str) -> str:
     # TODO make this more customizeable
@@ -12,12 +13,13 @@ def format_key(key: str) -> str:
 
 default_template = Path(__file__).parent / 'default_prompt.txt'
 
-class PromptComponentFormatter:
+class PromptComponentFormatter(Jsonizeable):
 
     def __init__(self, converters):
         """
         :param converters: Dictionary mapping keys to DataConverter instances
         """
+        # Capture input for Jsonizeable
         self.converters = converters
 
     def format_example(self, example):
@@ -91,8 +93,8 @@ class PromptComponentFormatter:
         return parsed_parts
 
 
-class PromptEngine:
-    def __init__(self, component_formatter, delimiter_obj=None, template_file=default_template):
+class PromptEngine(Jsonizeable):
+    def __init__(self, component_formatter, delimiter=None, template_file=default_template):
         """
         Generates prompt from template utilizing the component formatter to format the
         shots and query 
@@ -103,11 +105,16 @@ class PromptEngine:
         :param template_file: (optional) file containing Jinja2 template. default template used
             if not provided
         """
+        # capture input params for Jsonizeable
+        self.component_formatter = component_formatter
+        self.delimiter = delimiter
+        self.template_file = str(template_file)
+
+        # Do rest of instantiation
+        self.delimiter_obj = delimiter or BasicDelimiter('=', 6)
         template_file = Path(template_file).resolve()
         self.env = Environment(loader=FileSystemLoader(str(template_file.parent)))
         self.template = self.env.get_template(template_file.parts[-1])
-        self.component_formatter = component_formatter
-        self.delimiter_obj = delimiter_obj or BasicDelimiter('=', 6)
         self.required_variables = self._get_required_variables()
 
     def _get_required_variables(self):
