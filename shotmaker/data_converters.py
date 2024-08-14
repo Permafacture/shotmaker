@@ -59,6 +59,66 @@ class StringConverter(DataConverter):
     def parse(self, formatted_str: str) -> Any:
         return formatted_str.strip()
 
+
+class PairwiseGroupby(DataConverter):
+    ''' Format a List of Dicts using only two keys. One will be the value
+    to be aggregated and the other will be the value to group by on.
+
+    >>> data = [{'key1': 'Bob', 'key2': 'Person'},
+    >>>         {'key1': 'Alice', 'key2': 'Person'},
+    >>>         {'key1': 'Rover', 'key2': 'Dog'}]
+    >>>
+    >>> formatter = PairwiseGroupby('key1', 'key2', fields=['Dog', 'Place', 'Person'])
+    >>> formatted = formatter.format(data)
+    >>> print(formatted)
+    >>> parsed = formatter.parse(formatted)
+    >>> key_fun = lambda x: (x['key1'], x['key2'])
+    >>> # Note order cannot be preserved here
+    >>> sorted(parsed, key=key_fun) == sorted(data, key=key_fun)
+
+    outputs:
+        Dog: Rover
+        Place:
+        Person: Bob, Alice
+
+    '''
+
+    def __init__(self, agg, by, fields=None, none_val='', key_delim=': ', val_delim=", ", indent=4):
+        self.agg = agg
+        self.by = by
+        self.fields=fields
+        self.none_val = none_val
+        self.key_delim = key_delim
+        self.val_delim = val_delim
+        self.indent = indent
+
+    def format(self, data):
+        fields = self.fields
+        if fields is None:
+            fields = list(set(x[self.by] for x in data))
+        result = []
+        for field in fields:
+            vals = [x[self.agg] for x in data if x[self.by] == field]
+            if not vals and self.none_val is not None:
+                vals = [self.none_val]
+            result.append(' '*self.indent + f"{field}{self.key_delim}{self.val_delim.join(vals)}")
+        return '\n'.join(result)
+
+    def parse(self, string):
+        result = []
+        for row in string.split('\n'):
+            row = row.strip()
+            if not row:
+                continue
+            key, vals = row.split(self.key_delim.strip())
+            key = key.strip()
+            for val in vals.split(self.val_delim.strip()):
+                if not val:
+                    continue
+                result.append({self.by: key, self.agg: val.strip()})
+        return result
+
+
 class LineTemplateConverter(DataConverter):
     ''' Format a List of Dicts into a template string
     fields are delimited by template_characters, which are characters that
@@ -92,10 +152,11 @@ class LineTemplateConverter(DataConverter):
         Rover (Dog)
     '''
 
-    def __init__(self, template, fields, template_characters='(){}[]|;:'):
+    def __init__(self, template, fields, template_characters='(){}[]|;:', indent=4):
         self.template = template
         self.fields = fields
         self.template_characters = template_characters
+        self.indent = indent
         self._validate_template()
         self.pattern = self._create_pattern()
 
@@ -129,7 +190,7 @@ class LineTemplateConverter(DataConverter):
         result = self.template
         for field in self.fields:
             result = result.replace(field, data[field].strip())
-        return result
+        return ' '*self.indent + result
 
     def _parse_line(self, string):
         match = self.pattern.match(string)

@@ -24,13 +24,13 @@ pip install git+https://github.com/Permafacture/shotmaker.git  # Note: Not yet p
 ## Quick Start
 
 ```python
-from shotmaker import PromptEngine, PromptComponentFormatter, StringConverter, MarkdownTableConverter
+from shotmaker import PromptEngine, PromptComponentFormatter, StringConverter, LineTemplateConverter
 
 # Initialize formatters
 component_formatter = PromptComponentFormatter({
     'passage': StringConverter(),
     'summary': StringConverter(),
-    'entities': MarkdownTableConverter()
+    'entities': LineTemplateConverter('name (type)', fields=['name', 'type'], indent=4)
 })
 
 # Create PromptEngine
@@ -48,6 +48,18 @@ examples = [
 ]
 
 query = {'passage': 'Query passage'}
+
+# see a single formatted example
+print(component_formatter.format_example(examples[0]))
+
+# Passage:
+# Example passage 1
+# 
+# Summary:
+# Example summary 1
+# 
+# Entities:
+#     Entity1 (Type1)
 
 # Generate prompt
 prompt = prompt_engine.generate_prompt(context, examples, query)
@@ -70,8 +82,6 @@ result_from_reconstructed = new_prompt_engine.parse_result(reponse)
 reconstructed_examples = prompt_engine.load(prompt)
 examples == reconstructed_examples[:2]  # last item is the query
 ```
-
-
 
 ## Support
 
