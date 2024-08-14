@@ -59,6 +59,91 @@ class StringConverter(DataConverter):
     def parse(self, formatted_str: str) -> Any:
         return formatted_str.strip()
 
+class LineTemplateConverter(DataConverter):
+    ''' Format a List of Dicts into a template string
+    fields are delimited by template_characters, which are characters that
+    can only be in the template. Template characters appearing in a value will
+    break the parsing.
+
+    example templates:
+        "key1 key2"          not valid because keys are not seperated by template characters
+        "key1 | key2"        valid
+        "key1 | AAA | key2"  valid
+        "key1 AAA key2"      will validate but won't work
+
+    stick to spaces and template characters in your template for best results
+
+    # TODO make "key1 AAA key2" fail validation
+    # TODO should template characters be automatically determined? Or is explicit better?
+
+    >>> data = [{'key1': 'Bob', 'key2': 'Person'},
+    >>>         {'key1': 'Alice', 'key2': 'Person'},
+    >>>         {'key1': 'Rover', 'key2': 'Dog'}]
+    >>>
+    >>> formatter = LineTemplateConverter("key1 (key2)", fields=['key1', 'key2'])
+    >>> formatted = formatter.format(data)
+    >>> print(formatted)
+    >>> parsed = formatter.parse(formatted)
+    >>> parsed == data
+
+    outputs:
+        Bob (Person)
+        Alice (Person)
+        Rover (Dog)
+    '''
+
+    def __init__(self, template, fields, template_characters='(){}[]|;:'):
+        self.template = template
+        self.fields = fields
+        self.template_characters = template_characters
+        self._validate_template()
+        self.pattern = self._create_pattern()
+
+    def _validate_template(self):
+        value_pattern = f"[^{re.escape(self.template_characters+' ')}]+"
+        pieces = value_pattern.split(self.template)
+        assert all(len(delim) > 0 for delim in pieces[1:-1])
+
+    def _create_pattern(self):
+        template_characters = self.template_characters
+        value_pattern = f"[^{re.escape(template_characters)}]+"
+
+        # validate template and remove spaces
+        template = self.template
+        split = re.split('|'.join(self.fields), template)
+        assert not any(set(p) in (set(), set(' ')) for p in split[1: -1])  # keys are separated
+        for field in self.fields:
+            template = field.join(x.strip() for x in re.split(field, template))
+
+        pattern = re.escape(template)
+        for field in self.fields:
+            pattern = pattern.replace(field, f"(?P<{field}>{value_pattern})")
+
+        return re.compile(f"^{pattern}$")
+
+    def _format_line(self, data):
+        missing_keys = set(self.fields) - set(data.keys())
+        if missing_keys:
+            raise ValueError(f"Missing keys in data: {missing_keys}")
+
+        result = self.template
+        for field in self.fields:
+            result = result.replace(field, data[field].strip())
+        return result
+
+    def _parse_line(self, string):
+        match = self.pattern.match(string)
+        if not match:
+            raise ValueError("Input string does not match the template format")
+
+        return {field: match.group(field).strip() for field in self.fields}
+
+    def format(self, data):
+        return '\n'.join(self._format_line(item) for item in data)
+
+    def parse(self, string):
+        return [self._parse_line(line.strip()) for line in string.split('\n')]
+
 
 class MarkdownTableConverter(DataConverter):
     def format(self, data: List[Dict[str, Any]]) -> str:
