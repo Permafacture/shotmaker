@@ -53,8 +53,12 @@ class DataConverter(ABC, Jsonizeable):
 
 
 class StringConverter(DataConverter):
+    def __init__(self, newlines=0, indent=0):
+        self.newlines = newlines
+        self.indent = indent
+
     def format(self, data: Any) -> str:
-        return str(data)
+        return '\n'*self.newlines + ' '*self.indent + str(data)
 
     def parse(self, formatted_str: str) -> Any:
         return formatted_str.strip()
@@ -152,55 +156,60 @@ class LineTemplateConverter(DataConverter):
         Rover (Dog)
     '''
 
-    def __init__(self, template, fields, template_characters='(){}[]|;:', indent=4):
+    def __init__(self, template, complex_key=None, indent=4):
         self.template = template
-        self.fields = fields
-        self.template_characters = template_characters
+        self.complex_key = complex_key
         self.indent = indent
+        self.keys = self._extract_keys()
         self._validate_template()
-        self.pattern = self._create_pattern()
+
+    def _extract_keys(self) -> list:
+        return re.findall(r'(\w+)', self.template)
 
     def _validate_template(self):
-        value_pattern = f"[^{re.escape(self.template_characters+' ')}]+"
-        pieces = value_pattern.split(self.template)
-        assert all(len(delim) > 0 for delim in pieces[1:-1])
+        if self.complex_key and self.complex_key not in self.keys:
+            raise ValueError(f"Complex key {self.complex_key} not found in template")
+        
+        parts = re.split(r'(\w+)', self.template)
+        for i in range(0, len(parts) - 1, 2):
+            if parts[i].strip() == '' and parts[i+2].strip() == '':
+                raise ValueError(f"Ambiguous template near key {parts[i+1]}")
+        spaceless = re.sub(r'\s*([a-zA-Z0-9]+)\s*', r'\1', self.template)
+        regexes = dict()
+        for key in self.keys:
+            if key == self.complex_key:
+                regexes[key] = '.*?'
+            else:
+                pieces = spaceless.split(key)
+                p = []
+                if pieces[0]:
+                    p.append(pieces[0][-1])
+                if pieces[1]:
+                    p.append(pieces[1][0])
+                p = ''.join(p)
+                regexes[key] = f"[^{re.escape(p)}]+"
+        pattern = re.escape(spaceless)
+        for key in self.keys:
+            pattern = pattern.replace(key, f'(?P<{key}>{regexes[key]})')
+        self.pattern = re.compile(f'^{pattern}$')
+  
+    def _format_line(self, data: Dict[str, str]) -> str:
+        if set(self.keys) != set(data.keys()):
+            raise ValueError("Input data keys do not match template keys")
+        rep = {re.escape(k): data[k] for k in self.keys}
+        pattern = re.compile("|".join(rep.keys()))
+        return pattern.sub(lambda m: rep[re.escape(m.group(0))], self.template)
 
-    def _create_pattern(self):
-        template_characters = self.template_characters
-        value_pattern = f"[^{re.escape(template_characters)}]+"
-
-        # validate template and remove spaces
-        template = self.template
-        split = re.split('|'.join(self.fields), template)
-        assert not any(set(p) in (set(), set(' ')) for p in split[1: -1])  # keys are separated
-        for field in self.fields:
-            template = field.join(x.strip() for x in re.split(field, template))
-
-        pattern = re.escape(template)
-        for field in self.fields:
-            pattern = pattern.replace(field, f"(?P<{field}>{value_pattern})")
-
-        return re.compile(f"^{pattern}$")
-
-    def _format_line(self, data):
-        missing_keys = set(self.fields) - set(data.keys())
-        if missing_keys:
-            raise ValueError(f"Missing keys in data: {missing_keys}")
-
-        result = self.template
-        for field in self.fields:
-            result = result.replace(field, data[field].strip())
-        return ' '*self.indent + result
-
-    def _parse_line(self, string):
-        match = self.pattern.match(string)
+    def _parse_line(self, formatted_string: str) -> Dict[str, str]:
+        
+        match = self.pattern.match(formatted_string)
         if not match:
-            raise ValueError("Input string does not match the template format")
-
-        return {field: match.group(field).strip() for field in self.fields}
+            raise ValueError(f"Formatted string does not match template: {formatted_string}")
+        
+        return {key: match.group(key).strip() for key in self.keys}
 
     def format(self, data):
-        return '\n'.join(self._format_line(item) for item in data)
+        return '\n' + '\n'.join(' '*self.indent + self._format_line(item) for item in data)
 
     def parse(self, string):
         return [self._parse_line(line.strip()) for line in string.split('\n')]

@@ -9,7 +9,7 @@ from shotmaker.serialization import Jsonizeable
 
 def format_key(key: str) -> str:
     # TODO make this more customizeable
-    return f"{key.title()}:\n"
+    return f"{key.title()}:"
 
 default_template = Path(__file__).parent / 'default_prompt.txt'
 
@@ -54,7 +54,9 @@ class PromptComponentFormatter(Jsonizeable):
         """
         formatted_parts = []
         for key, value in data.items():
-            converter = self.converters.get(key, StringConverter())
+            converter = self.converters.get(key)
+            if converter is None:
+                continue
             formatted_value = converter.format(value)
             formatted_parts.append(f"{format_key(key)}{formatted_value}")
         return "\n\n".join(formatted_parts)
@@ -68,27 +70,37 @@ class PromptComponentFormatter(Jsonizeable):
         """
         parsed_parts = {}
         keys = list(self.converters.keys())
+        result = result.strip()
 
+        parts = []
         for i, key in enumerate(keys):
-            start_index = result.find(format_key(key))
-            if start_index == -1:
+            match = re.search(f"(^|\n){re.escape(format_key(key))}", result)
+            if not match:
                 parsed_parts[key] = None
                 continue
 
-            start_index += len(format_key(key))
+            start, end = match.span()
+            parts.append((start, end, key))
 
-            if i < len(keys) - 1:
-                end_index = result.find(format_key(keys[i+1]))
-                if end_index == -1:
-                    end_index = len(result)
-            else:
-                end_index = len(result)
+        parts.sort()
 
-            formatted_part = result[start_index:end_index].strip()
+        # if this was a completion, the result may begin with completing the section that came before this
+        first_key = parts[0][2]
+        if keys.index(first_key) != 0 and parts[0][0] != 0:
+            parts = [(0, 0, keys[keys.index(first_key)-1])] + parts
+
+        for start, stop in zip(parts, parts[1:]):
+            key = start[2]
+            formatted_part = result[start[1]:stop[0]].strip()
             if not formatted_part:
                 parsed_parts[key] = None
             else:
                 parsed_parts[key] = self.converters[key].parse(formatted_part)
+
+        stop = parts[-1]
+        key = stop[2]
+        formatted_part = result[stop[1]:].strip()
+        parsed_parts[key] = self.converters[key].parse(formatted_part) if formatted_part else None
 
         return parsed_parts
 
